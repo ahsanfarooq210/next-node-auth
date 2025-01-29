@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import NextAuth from "next-auth";
+import NextAuth, { DefaultSession } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import axios from "axios";
@@ -9,30 +9,28 @@ declare module "next-auth" {
   interface Session {
     accessToken?: string;
     refreshToken?: string;
-    user?: {
-      id?: string;
-      name?: string;
-      email?: string;
-    };
+    error?: string;
+    provider?: string;
+    user: {
+      id?: string | undefined;
+      firstName: string;
+      lastName: string;
+      email?: string | null | undefined;
+      imageUrl?: string;
+    } & DefaultSession["user"];
   }
 
   interface User {
-    id?: string;
-    name?: string | null;
-    email?: string | null;
+    id?: string | undefined;
+    firstName: string;
+    lastName: string;
+    email?: string | null | undefined;
+    imageUrl?: string;
     accessToken?: string;
     refreshToken?: string;
-    password?: string;
-  }
-
-  interface JWT {
-    accessToken?: string;
-    refreshToken?: string;
-    user?: {
-      id?: string;
-      name?: string;
-      email?: string;
-    };
+    token?: string;
+    provider?: string;
+    accessTokenExpires?: number;
   }
 }
 
@@ -40,10 +38,43 @@ declare module "next-auth/jwt" {
   interface JWT {
     accessToken?: string;
     refreshToken?: string;
-    user?: {
-      id?: string;
-      name?: string;
-      email?: string;
+    provider?: string;
+    error?: string;
+    user: {
+      id?: string | undefined;
+      firstName: string;
+      lastName: string;
+      email?: string | null | undefined;
+      imageUrl?: string;
+    };
+  }
+}
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL;
+
+async function refreshAccessToken(token: JWT) {
+  try {
+    const response = await axios.post(`${BACKEND_URL}/auth/refresh-token`, {
+      refreshToken: token.refreshToken,
+    });
+
+    if (!response.data?.data?.accessToken) {
+      return {
+        ...token,
+        error: "RefreshAccessTokenError",
+      };
+    }
+
+    return {
+      ...token,
+      accessToken: response.data.data.accessToken,
+      refreshToken: response.data.data.refreshToken || token.refreshToken,
+      error: undefined,
+    };
+  } catch (error) {
+    return {
+      ...token,
+      error: "RefreshAccessTokenError",
     };
   }
 }
@@ -51,65 +82,190 @@ declare module "next-auth/jwt" {
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
     Credentials({
+      id: "credentials",
+      name: "Credentials",
       credentials: {
-        username: { label: "Username" },
+        email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        const { username, password } = credentials;
+        if (!credentials?.email || !credentials?.password) return null;
 
-        if (username === "user" && password === "password") {
-          return { id: "1", name: "User", email: "user@example.com", password };
+        try {
+          const response = await axios.post(`${BACKEND_URL}/auth/login`, {
+            email: credentials.email,
+            password: credentials.password,
+          });
+
+          if (response.data?.data?.user && response.data?.data?.token) {
+            return {
+              ...response.data.data.user,
+              token: response.data.data.token,
+              provider: "credentials",
+            };
+          }
+
+          return null;
+        } catch (error) {
+          return null;
         }
-
-        return null;
       },
     }),
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      authorization: {
+        params: {
+          prompt: "consent",
+          access_type: "offline",
+          response_type: "code",
+        },
+      },
     }),
   ],
   callbacks: {
-    async signIn({ user }) {
-      const customUser = user;
+    async signIn({ user, account }) {
       try {
-        const response = await axios.post(
-          "https://your-backend-api.com/auth/signin",
-          {
-            username: customUser.name,
-            password: customUser.password,
-          }
-        );
+        if (account?.provider === "credentials" && user.token) {
+          // For credentials provider, generate tokens using the initial token
+          const response = await axios.post(
+            `${BACKEND_URL}/auth/generate-tokens`,
+            {
+              token: user.token,
+              tokenType: "initial",
+            }
+          );
 
-        if (response.data.accessToken && response.data.refreshToken) {
-          customUser.accessToken = response.data.accessToken;
-          customUser.refreshToken = response.data.refreshToken;
-          return true;
-        } else {
-          return false;
+          if (
+            response.data?.data?.accessToken &&
+            response.data?.data?.refreshToken
+          ) {
+            user.accessToken = response.data.data.accessToken;
+            user.refreshToken = response.data.data.refreshToken;
+            return true;
+          }
+        } else if (account?.provider === "google" && account?.access_token) {
+          // For Google provider, generate tokens using the Google access token
+          const response = await axios.post(
+            `${BACKEND_URL}/auth/generate-tokens`,
+            {
+              token: account.access_token,
+              tokenType: "google",
+            }
+          );
+
+          if (
+            response.data?.data?.accessToken &&
+            response.data?.data?.refreshToken
+          ) {
+            user.accessToken = response.data.data.accessToken;
+            user.refreshToken = response.data.data.refreshToken;
+            user.id = response.data.data.user.id;
+            user.firstName = response.data.data.user.firstName;
+            user.lastName = response.data.data.user.lastName;
+            user.email = response.data.data.user.email;
+            user.imageUrl = response.data.data.user.imageUrl;
+            return true;
+          }
         }
+
+        return false;
       } catch (error) {
         console.error("Error during sign-in callback:", error);
         return false;
       }
     },
-    async jwt({ token, user }) {
-      if (user) {
-        const customUser = user;
-        token.accessToken = customUser.accessToken;
-        token.refreshToken = customUser.refreshToken;
+
+    async jwt({ token, user, account, trigger, session }) {
+      // Initial sign in
+      if (user && account) {
+        token.accessToken = user.accessToken;
+        token.refreshToken = user.refreshToken;
+        token.provider = account.provider;
+        token.user = {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          imageUrl: user.imageUrl,
+        };
+        return token;
       }
-      return token;
+
+      // Return previous token if the access token has not expired yet
+      if (
+        typeof token.accessTokenExpires === "number" &&
+        Date.now() < token.accessTokenExpires
+      ) {
+        return token;
+      }
+
+      // Access token has expired, try to refresh it
+      if (token.provider === "google" && account?.access_token) {
+        try {
+          // First refresh the Google token using Next Auth's built-in mechanism
+          const response = await fetch(
+            "https://accounts.google.com/o/oauth2/token",
+            {
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({
+                client_id: process.env.GOOGLE_CLIENT_ID!,
+                client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+                grant_type: "refresh_token",
+                refresh_token: token.refreshToken!,
+              }),
+              method: "POST",
+            }
+          );
+
+          const tokens = await response.json();
+
+          if (!response.ok) throw tokens;
+
+          // Then use the new Google token to get fresh access/refresh tokens from your backend
+          const backendResponse = await axios.post(
+            `${BACKEND_URL}/auth/generate-tokens`,
+            {
+              token: tokens.access_token,
+              tokenType: "google",
+            }
+          );
+
+          return {
+            ...token,
+            accessToken: backendResponse.data.data.accessToken,
+            refreshToken: backendResponse.data.data.refreshToken,
+            error: undefined,
+          };
+        } catch (error) {
+          return { ...token, error: "RefreshAccessTokenError" };
+        }
+      } else {
+        // Regular token refresh for credentials provider
+        return refreshAccessToken(token);
+      }
     },
+
     async session({ session, token }) {
       session.accessToken = token.accessToken;
       session.refreshToken = token.refreshToken;
+      session.error = token.error;
+      session.provider = token.provider;
+      session.user = {
+        ...token.user,
+        id: token.user.id ?? "",
+        email: token.user.email ?? "",
+        emailVerified: new Date(),
+      };
       return session;
     },
   },
   pages: {
     signIn: "/auth/signin",
     signOut: "/auth/signout",
+    error: "/auth/error",
+  },
+  session: {
+    strategy: "jwt",
   },
 });
