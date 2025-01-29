@@ -1,10 +1,11 @@
-import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+import { OAuth2Client } from "google-auth-library";
 import prisma from "../db/prisma";
 
 dotenv.config();
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateTokens = (user: { id: string }) => {
   const accessToken = jwt.sign(
@@ -29,6 +30,13 @@ const generateInitialToken = (user: { id: string }) => {
     { expiresIn: "5m" }
   );
 };
+
+interface GoogleTokenPayload {
+  email: string;
+  given_name?: string;
+  family_name?: string;
+  picture?: string;
+}
 
 export class AuthService {
   static async signup(
@@ -91,23 +99,77 @@ export class AuthService {
     }
   }
 
-  static async generateAuthTokens(initialToken: string) {
+  static async verifyGoogleToken(token: string): Promise<GoogleTokenPayload> {
     try {
-      if (!initialToken) {
-        return { status: 401, data: { message: "Token required" } };
-      }
-
-      const decoded = jwt.verify(
-        initialToken,
-        process.env.INITIAL_TOKEN_SECRET as string
-      ) as { userId: string };
-
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
+      const ticket = await googleClient.verifyIdToken({
+        idToken: token,
+        audience: process.env.GOOGLE_CLIENT_ID,
       });
+      const payload = ticket.getPayload();
+      if (!payload) {
+        throw new Error("Invalid Google token");
+      }
+      return {
+        email: payload.email!,
+        given_name: payload.given_name,
+        family_name: payload.family_name,
+        picture: payload.picture,
+      };
+    } catch (error) {
+      throw new Error("Failed to verify Google token");
+    }
+  }
 
-      if (!user) {
-        return { status: 403, data: { message: "Invalid token" } };
+  static async generateAuthTokens(
+    token: string,
+    tokenType: "initial" | "google" = "initial"
+  ) {
+    try {
+      let user;
+
+      if (tokenType === "initial") {
+        // Handle initial token flow
+        if (!token) {
+          return { status: 401, data: { message: "Token required" } };
+        }
+
+        const decoded = jwt.verify(
+          token,
+          process.env.INITIAL_TOKEN_SECRET as string
+        ) as { userId: string };
+
+        user = await prisma.user.findUnique({
+          where: { id: decoded.userId },
+        });
+
+        if (!user) {
+          return { status: 403, data: { message: "Invalid token" } };
+        }
+      } else {
+        // Handle Google token flow
+        try {
+          const googleUserData = await this.verifyGoogleToken(token);
+
+          // Find or create user based on Google email
+          user = await prisma.user.findUnique({
+            where: { email: googleUserData.email },
+          });
+
+          if (!user) {
+            // Create new user with Google data
+            user = await prisma.user.create({
+              data: {
+                email: googleUserData.email,
+                firstName: googleUserData.given_name || "",
+                lastName: googleUserData.family_name || "",
+                imageUrl: googleUserData.picture,
+                password: await bcrypt.hash(Math.random().toString(36), 10), // Random password for Google users
+              },
+            });
+          }
+        } catch (error) {
+          return { status: 401, data: { message: "Invalid Google token" } };
+        }
       }
 
       const { accessToken, refreshToken } = generateTokens(user);
@@ -119,7 +181,17 @@ export class AuthService {
 
       return {
         status: 200,
-        data: { accessToken, refreshToken },
+        data: {
+          accessToken,
+          refreshToken,
+          user: {
+            id: user.id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            imageUrl: user.imageUrl,
+          },
+        },
       };
     } catch (error) {
       if (error instanceof jwt.JsonWebTokenError) {

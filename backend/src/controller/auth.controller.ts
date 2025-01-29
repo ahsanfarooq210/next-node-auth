@@ -29,8 +29,8 @@ export class AuthController {
 
   static async generateAuthTokens(req: Request, res: Response) {
     try {
-      const { token } = req.body;
-      const response = await AuthService.generateAuthTokens(token);
+      const { token, tokenType } = req.body;
+      const response = await AuthService.generateAuthTokens(token, tokenType);
       res.status(response.status).json(response.data);
     } catch (error) {
       res.status(500).json({ message: "Internal server error" });
