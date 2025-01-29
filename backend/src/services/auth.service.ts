@@ -2,9 +2,9 @@ import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+import prisma from "../db/prisma";
 
 dotenv.config();
-const prisma = new PrismaClient();
 
 const generateTokens = (user: { id: string }) => {
   const accessToken = jwt.sign(
