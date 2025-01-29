@@ -22,6 +22,14 @@ const generateTokens = (user: { id: string }) => {
   return { accessToken, refreshToken };
 };
 
+const generateInitialToken = (user: { id: string }) => {
+  return jwt.sign(
+    { userId: user.id },
+    process.env.INITIAL_TOKEN_SECRET as string,
+    { expiresIn: "5m" }
+  );
+};
+
 export class AuthService {
   static async signup(
     firstName: string,
@@ -63,11 +71,7 @@ export class AuthService {
         return { status: 401, data: { message: "Invalid credentials" } };
       }
 
-      const { accessToken, refreshToken } = generateTokens(user);
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { refreshToken: await bcrypt.hash(refreshToken, 10) },
-      });
+      const initialToken = generateInitialToken(user);
 
       return {
         status: 200,
@@ -79,11 +83,48 @@ export class AuthService {
             email: user.email,
             imageUrl: user.imageUrl,
           },
-          accessToken,
-          refreshToken,
+          token: initialToken,
         },
       };
     } catch (error) {
+      return { status: 500, data: { message: "Internal server error" } };
+    }
+  }
+
+  static async generateAuthTokens(initialToken: string) {
+    try {
+      if (!initialToken) {
+        return { status: 401, data: { message: "Token required" } };
+      }
+
+      const decoded = jwt.verify(
+        initialToken,
+        process.env.INITIAL_TOKEN_SECRET as string
+      ) as { userId: string };
+
+      const user = await prisma.user.findUnique({
+        where: { id: decoded.userId },
+      });
+
+      if (!user) {
+        return { status: 403, data: { message: "Invalid token" } };
+      }
+
+      const { accessToken, refreshToken } = generateTokens(user);
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { refreshToken: await bcrypt.hash(refreshToken, 10) },
+      });
+
+      return {
+        status: 200,
+        data: { accessToken, refreshToken },
+      };
+    } catch (error) {
+      if (error instanceof jwt.JsonWebTokenError) {
+        return { status: 403, data: { message: "Invalid token" } };
+      }
       return { status: 500, data: { message: "Internal server error" } };
     }
   }
@@ -98,9 +139,11 @@ export class AuthService {
         refreshToken,
         process.env.REFRESH_TOKEN_SECRET as string
       ) as { userId: string };
+
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
       });
+
       if (
         !user ||
         !user.refreshToken ||
@@ -111,6 +154,7 @@ export class AuthService {
 
       const { accessToken, refreshToken: newRefreshToken } =
         generateTokens(user);
+
       await prisma.user.update({
         where: { id: user.id },
         data: { refreshToken: await bcrypt.hash(newRefreshToken, 10) },
