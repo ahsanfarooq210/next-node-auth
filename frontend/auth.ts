@@ -5,6 +5,7 @@ import Credentials from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import axios from "axios";
 import { JWT } from "next-auth/jwt";
+import { jwtDecode } from "jwt-decode";
 
 declare module "next-auth" {
   interface Session {
@@ -85,6 +86,19 @@ async function refreshAccessToken(token: JWT) {
     };
   }
 }
+
+const isTokenExpired = (token: string) => {
+  if (!token) return true;
+  try {
+    const decodedToken = jwtDecode(token);
+    const currentTime = Date.now() / 1000;
+    if (!decodedToken.exp) return true;
+    return decodedToken.exp < currentTime;
+  } catch (error) {
+    console.error("Error decoding token:", error);
+    return true;
+  }
+};
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -224,6 +238,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         account,
         token,
       });
+
       // TODO: Add a check to see that if the google access token is expired, only then the access token is refreshed.
 
       if (token.provider === "google" && token.googleRefreshToken) {
@@ -250,7 +265,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
           if (!response.ok) throw tokens;
 
-          // Then use the new Google token to get fresh access/refresh tokens from your backend
+          //TODO: only refresh the backend tokens if the backend tokens are expired
           const backendResponse = await axios.post(
             `${BACKEND_URL}/auth/generate-tokens`,
             {
