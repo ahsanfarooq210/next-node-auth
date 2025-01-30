@@ -10,6 +10,8 @@ declare module "next-auth" {
   interface Session {
     accessToken?: string;
     refreshToken?: string;
+    googleAccessToken?: string;
+    googleRefreshToken?: string;
     error?: string;
     provider?: string;
     user: {
@@ -29,6 +31,8 @@ declare module "next-auth" {
     imageUrl?: string;
     accessToken?: string;
     refreshToken?: string;
+    googleAccessToken?: string;
+    googleRefreshToken?: string;
     token?: string;
     provider?: string;
     accessTokenExpires?: number;
@@ -39,6 +43,8 @@ declare module "next-auth/jwt" {
   interface JWT {
     accessToken?: string;
     refreshToken?: string;
+    googleAccessToken?: string;
+    googleRefreshToken?: string;
     provider?: string;
     error?: string;
     user: {
@@ -159,9 +165,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             console.log("generated token response", response.data);
 
             if (response.data?.accessToken && response.data?.refreshToken) {
-              console.log("generated token response", response.data);
+              console.log("generated token response", );
               user.accessToken = response.data.accessToken;
               user.refreshToken = response.data.refreshToken;
+              user.googleAccessToken = account.id_token;
+              user.googleRefreshToken = account.refresh_token;
               user.id = response.data.user.id;
               user.firstName = response.data.user.firstName;
               user.lastName = response.data.user.lastName;
@@ -188,8 +196,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async jwt({ token, user, account, trigger, session }) {
       // Initial sign in
       if (user && account) {
+
         token.accessToken = user.accessToken;
         token.refreshToken = user.refreshToken;
+        token.googleAccessToken = user.googleAccessToken;
+        token.googleRefreshToken = user.googleRefreshToken;
         token.provider = account.provider;
         token.user = {
           id: user.id,
@@ -210,9 +221,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
 
       // Access token has expired, try to refresh it
-      if (token.provider === "google" && account?.access_token) {
+      console.log("about to refresh google token outer", {
+        account,
+        token,
+      });
+
+      if (token.provider === "google" && token.accessToken) {
         try {
           // First refresh the Google token using Next Auth's built-in mechanism
+          console.log("about to refresh google token inner");
           const response = await fetch(
             "https://accounts.google.com/o/oauth2/token",
             {
@@ -228,6 +245,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           );
 
           const tokens = await response.json();
+
+          console.log("refreshed token", tokens);
 
           if (!response.ok) throw tokens;
 
