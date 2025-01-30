@@ -12,6 +12,8 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
+import credentialsSignin from "@/server-actions/credentialsLogin";
+import googleLogin from "@/server-actions/googleLogin";
 
 interface FormInputs {
   email: string;
@@ -26,8 +28,20 @@ const SignInPage: React.FC = () => {
     },
   });
 
-  const onSubmit = (data: FormInputs) => {
-    console.log("Form submitted:", data);
+  const onSubmit = async (data: FormInputs) => {
+    try {
+      await credentialsSignin(data.email, data.password);
+    } catch (error) {
+      console.error("error while credential signin", error);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      await googleLogin();
+    } catch (error) {
+      console.error("error while google login", error);
+    }
   };
 
   return (
@@ -111,6 +125,7 @@ const SignInPage: React.FC = () => {
                   <Button
                     type="button"
                     variant="outline"
+                    onClick={handleGoogleLogin}
                     className="w-full h-12 flex items-center justify-center space-x-2 border-zinc-200 hover:bg-zinc-50"
                   >
                     <svg className="w-5 h-5" viewBox="0 0 24 24">

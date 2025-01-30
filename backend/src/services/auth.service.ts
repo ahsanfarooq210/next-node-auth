@@ -119,6 +119,7 @@ export class AuthService {
         picture: payload.picture,
       };
     } catch (error) {
+      console.log("erorr in the google verify token function", error);
       throw new Error("Failed to verify Google token");
     }
   }
@@ -151,7 +152,9 @@ export class AuthService {
       } else {
         // Handle Google token flow
         try {
+          console.log("about to verify the google token");
           const googleUserData = await this.verifyGoogleToken(token);
+          console.log("google token verified", googleUserData);
 
           // Find or create user based on Google email
           user = await prisma.user.findUnique({
@@ -171,6 +174,7 @@ export class AuthService {
             });
           }
         } catch (error) {
+          console.log("Error during Google token verification:", error);
           return { status: 401, data: { message: "Invalid Google token" } };
         }
       }

@@ -30,6 +30,10 @@ export class AuthController {
   static async generateAuthTokens(req: Request, res: Response) {
     try {
       const { token, tokenType } = req.body;
+      console.log("generate token api is running", {
+        token,
+        tokenType,
+      });
       const response = await AuthService.generateAuthTokens(token, tokenType);
       res.status(response.status).json(response.data);
     } catch (error) {

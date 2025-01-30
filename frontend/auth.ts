@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import NextAuth, { DefaultSession } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
@@ -50,7 +51,7 @@ declare module "next-auth/jwt" {
   }
 }
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL;
+const BACKEND_URL = process.env.BACKEND_URL;
 
 async function refreshAccessToken(token: JWT) {
   try {
@@ -146,26 +147,34 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           }
         } else if (account?.provider === "google" && account?.access_token) {
           // For Google provider, generate tokens using the Google access token
-          const response = await axios.post(
-            `${BACKEND_URL}/auth/generate-tokens`,
-            {
-              token: account.access_token,
-              tokenType: "google",
-            }
-          );
+          try {
+            const response = await axios.post(
+              `${BACKEND_URL}/auth/generate-tokens`,
+              {
+                token: account.id_token,
+                tokenType: "google",
+              }
+            );
 
-          if (
-            response.data?.data?.accessToken &&
-            response.data?.data?.refreshToken
-          ) {
-            user.accessToken = response.data.data.accessToken;
-            user.refreshToken = response.data.data.refreshToken;
-            user.id = response.data.data.user.id;
-            user.firstName = response.data.data.user.firstName;
-            user.lastName = response.data.data.user.lastName;
-            user.email = response.data.data.user.email;
-            user.imageUrl = response.data.data.user.imageUrl;
-            return true;
+            console.log("generated token response", response.data);
+
+            if (response.data?.accessToken && response.data?.refreshToken) {
+              console.log("generated token response", response.data);
+              user.accessToken = response.data.accessToken;
+              user.refreshToken = response.data.refreshToken;
+              user.id = response.data.user.id;
+              user.firstName = response.data.user.firstName;
+              user.lastName = response.data.user.lastName;
+              user.email = response.data.user.email;
+              user.imageUrl = response.data.user.imageUrl;
+              return true;
+            }
+          } catch (error: any) {
+            console.log(
+              "Error during Google sign-in callback: generate token",
+              error.message
+            );
+            throw error;
           }
         }
 
