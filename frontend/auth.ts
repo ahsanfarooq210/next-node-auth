@@ -165,7 +165,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             console.log("generated token response", response.data);
 
             if (response.data?.accessToken && response.data?.refreshToken) {
-              console.log("generated token response", );
+              console.log("generated token response");
               user.accessToken = response.data.accessToken;
               user.refreshToken = response.data.refreshToken;
               user.googleAccessToken = account.id_token;
@@ -196,7 +196,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async jwt({ token, user, account, trigger, session }) {
       // Initial sign in
       if (user && account) {
-
         token.accessToken = user.accessToken;
         token.refreshToken = user.refreshToken;
         token.googleAccessToken = user.googleAccessToken;
@@ -213,20 +212,21 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
 
       // Return previous token if the access token has not expired yet
-      if (
-        typeof token.accessTokenExpires === "number" &&
-        Date.now() < token.accessTokenExpires
-      ) {
-        return token;
-      }
+      // if (
+      //   typeof token.accessTokenExpires === "number" &&
+      //   Date.now() < token.accessTokenExpires
+      // ) {
+      //   return token;
+      // }
 
       // Access token has expired, try to refresh it
       console.log("about to refresh google token outer", {
         account,
         token,
       });
+      // TODO: Add a check to see that if the google access token is expired, only then the access token is refreshed.
 
-      if (token.provider === "google" && token.accessToken) {
+      if (token.provider === "google" && token.googleRefreshToken) {
         try {
           // First refresh the Google token using Next Auth's built-in mechanism
           console.log("about to refresh google token inner");
@@ -238,7 +238,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                 client_id: process.env.GOOGLE_CLIENT_ID!,
                 client_secret: process.env.GOOGLE_CLIENT_SECRET!,
                 grant_type: "refresh_token",
-                refresh_token: token.refreshToken!,
+                refresh_token: token.googleRefreshToken!,
               }),
               method: "POST",
             }
