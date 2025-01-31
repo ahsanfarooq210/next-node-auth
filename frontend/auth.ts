@@ -6,6 +6,7 @@ import GoogleProvider from "next-auth/providers/google";
 import axios from "axios";
 import { JWT } from "next-auth/jwt";
 import { jwtDecode } from "jwt-decode";
+import { emitWarning } from "process";
 
 declare module "next-auth" {
   interface Session {
@@ -103,31 +104,42 @@ const isTokenExpired = (token: string) => {
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
     Credentials({
-      id: "credentials",
-      name: "Credentials",
+      type: "credentials",
+
       credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
+        username: {
+          type: "string",
+          label: "Email",
+        },
+        password: {
+          type: "string",
+          label: "Password",
+        },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null;
+        if (!credentials?.username || !credentials?.password) return null;
+        console.log("credentials authorize", { credentials });
 
         try {
           const response = await axios.post(`${BACKEND_URL}/auth/login`, {
-            email: credentials.email,
+            email: credentials.username,
             password: credentials.password,
           });
 
-          if (response.data?.data?.user && response.data?.data?.token) {
+          console.log("authorize callback user", response.data);
+
+          if (response.data.user && response.data.token) {
+            console.log("returning the user");
             return {
-              ...response.data.data.user,
-              token: response.data.data.token,
+              ...response.data.user,
+              token: response.data.token,
               provider: "credentials",
             };
           }
 
           return null;
         } catch (error) {
+          console.log("error in credentials authorize function", error);
           return null;
         }
       },
@@ -148,6 +160,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async signIn({ user, account }) {
       try {
         if (account?.provider === "credentials" && user.token) {
+          console.log("signin callback", { user, account });
           // For credentials provider, generate tokens using the initial token
           const response = await axios.post(
             `${BACKEND_URL}/auth/generate-tokens`,
@@ -158,11 +171,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           );
 
           if (
-            response.data?.data?.accessToken &&
-            response.data?.data?.refreshToken
+            response.data?.accessToken &&
+            response.data?.refreshToken
           ) {
-            user.accessToken = response.data.data.accessToken;
-            user.refreshToken = response.data.data.refreshToken;
+            user.accessToken = response.data.accessToken;
+            user.refreshToken = response.data.refreshToken;
             return true;
           }
         } else if (account?.provider === "google" && account?.access_token) {
