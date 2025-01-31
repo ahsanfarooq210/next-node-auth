@@ -53,8 +53,9 @@ export class AuthService {
 
       const hashedPassword = await bcrypt.hash(
         password,
-        process.env.BCRYPT_SALT_ROUNDS ?? 10
+        Number(process.env.BCRYPT_SALT_ROUNDS ?? "10")
       );
+
       await prisma.user.create({
         data: {
           firstName,
@@ -66,6 +67,7 @@ export class AuthService {
 
       return { status: 201, data: { message: "User created successfully" } };
     } catch (error) {
+      console.log("error during creating the user", error);
       return { status: 500, data: { message: "Internal server error" } };
     }
   }
@@ -98,7 +100,7 @@ export class AuthService {
         },
       };
     } catch (error) {
-      return { status: 500, data: { message: "Internal server error" } };
+      throw error;
     }
   }
 
@@ -169,7 +171,7 @@ export class AuthService {
                 firstName: googleUserData.given_name || "",
                 lastName: googleUserData.family_name || "",
                 imageUrl: googleUserData.picture,
-                password: await bcrypt.hash(Math.random().toString(36), 10), // Random password for Google users
+                password: await bcrypt.hash(Math.random().toString(36), 10), // Random password for Google users. if the same user wants to login, user will have to change the password via forget password implementation
               },
             });
           }

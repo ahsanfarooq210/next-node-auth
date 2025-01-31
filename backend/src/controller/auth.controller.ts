@@ -21,8 +21,10 @@ export class AuthController {
     try {
       const { email, password } = req.body;
       const response = await AuthService.login(email, password);
+      console.log("backend response", response);
       res.status(response.status).json(response.data);
     } catch (error) {
+      console.log("error in login controller", error);
       res.status(500).json({ message: "Internal server error" });
     }
   }

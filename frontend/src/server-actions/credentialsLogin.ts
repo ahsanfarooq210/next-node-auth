@@ -8,15 +8,18 @@ export default async function credentialsSignin(
   password: string
 ) {
   try {
+    console.log("credentials email and password", { email, password });
     await signIn("credentials", {
       username: email,
       password: password,
       redirect: true,
-      redirectTo: "/",
+      redirectTo: "/dashboard",
     });
   } catch (error) {
+    console.log("error during credentials login", error);
     if (error instanceof AuthError) {
       // Parse the error message from the credentials provider
+
       throw new Error(error?.cause?.err?.message);
     }
     throw error;

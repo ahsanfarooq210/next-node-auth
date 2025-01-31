@@ -7,7 +7,7 @@ export default async function googleLogin() {
   try {
     await signIn("google", {
       redirect: true,
-      redirectTo: "/",
+      redirectTo: "/dashboard",
     });
   } catch (error) {
     if (error instanceof AuthError) {

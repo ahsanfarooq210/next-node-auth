@@ -5,11 +5,15 @@ import Credentials from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import axios from "axios";
 import { JWT } from "next-auth/jwt";
+import { jwtDecode } from "jwt-decode";
+import { emitWarning } from "process";
 
 declare module "next-auth" {
   interface Session {
     accessToken?: string;
     refreshToken?: string;
+    googleAccessToken?: string;
+    googleRefreshToken?: string;
     error?: string;
     provider?: string;
     user: {
@@ -29,6 +33,8 @@ declare module "next-auth" {
     imageUrl?: string;
     accessToken?: string;
     refreshToken?: string;
+    googleAccessToken?: string;
+    googleRefreshToken?: string;
     token?: string;
     provider?: string;
     accessTokenExpires?: number;
@@ -39,6 +45,8 @@ declare module "next-auth/jwt" {
   interface JWT {
     accessToken?: string;
     refreshToken?: string;
+    googleAccessToken?: string;
+    googleRefreshToken?: string;
     provider?: string;
     error?: string;
     user: {
@@ -58,8 +66,9 @@ async function refreshAccessToken(token: JWT) {
     const response = await axios.post(`${BACKEND_URL}/auth/refresh-token`, {
       refreshToken: token.refreshToken,
     });
+    console.log("refreshed backend tokens", response.data);
 
-    if (!response.data?.data?.accessToken) {
+    if (!response.data?.accessToken) {
       return {
         ...token,
         error: "RefreshAccessTokenError",
@@ -67,9 +76,8 @@ async function refreshAccessToken(token: JWT) {
     }
 
     return {
-      ...token,
-      accessToken: response.data.data.accessToken,
-      refreshToken: response.data.data.refreshToken || token.refreshToken,
+      accessToken: response.data.accessToken,
+      refreshToken: response.data.refreshToken || token.refreshToken,
       error: undefined,
     };
   } catch (error) {
@@ -80,34 +88,58 @@ async function refreshAccessToken(token: JWT) {
   }
 }
 
+const isTokenExpired = (token: string) => {
+  if (!token) return true;
+  try {
+    const decodedToken = jwtDecode(token);
+    const currentTime = Date.now() / 1000;
+    if (!decodedToken.exp) return true;
+    return decodedToken.exp < currentTime;
+  } catch (error) {
+    console.error("Error decoding token:", error);
+    return true;
+  }
+};
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
     Credentials({
-      id: "credentials",
-      name: "Credentials",
+      type: "credentials",
+
       credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
+        username: {
+          type: "string",
+          label: "Email",
+        },
+        password: {
+          type: "string",
+          label: "Password",
+        },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null;
+        if (!credentials?.username || !credentials?.password) return null;
+        console.log("credentials authorize", { credentials });
 
         try {
           const response = await axios.post(`${BACKEND_URL}/auth/login`, {
-            email: credentials.email,
+            email: credentials.username,
             password: credentials.password,
           });
 
-          if (response.data?.data?.user && response.data?.data?.token) {
+          console.log("authorize callback user", response.data);
+
+          if (response.data.user && response.data.token) {
+            console.log("returning the user");
             return {
-              ...response.data.data.user,
-              token: response.data.data.token,
+              ...response.data.user,
+              token: response.data.token,
               provider: "credentials",
             };
           }
 
           return null;
         } catch (error) {
+          console.log("error in credentials authorize function", error);
           return null;
         }
       },
@@ -128,6 +160,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async signIn({ user, account }) {
       try {
         if (account?.provider === "credentials" && user.token) {
+          console.log("signin callback", { user, account });
           // For credentials provider, generate tokens using the initial token
           const response = await axios.post(
             `${BACKEND_URL}/auth/generate-tokens`,
@@ -138,11 +171,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           );
 
           if (
-            response.data?.data?.accessToken &&
-            response.data?.data?.refreshToken
+            response.data?.accessToken &&
+            response.data?.refreshToken
           ) {
-            user.accessToken = response.data.data.accessToken;
-            user.refreshToken = response.data.data.refreshToken;
+            user.accessToken = response.data.accessToken;
+            user.refreshToken = response.data.refreshToken;
             return true;
           }
         } else if (account?.provider === "google" && account?.access_token) {
@@ -159,9 +192,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             console.log("generated token response", response.data);
 
             if (response.data?.accessToken && response.data?.refreshToken) {
-              console.log("generated token response", response.data);
+              console.log("generated token response");
               user.accessToken = response.data.accessToken;
               user.refreshToken = response.data.refreshToken;
+              user.googleAccessToken = account.id_token;
+              user.googleRefreshToken = account.refresh_token;
               user.id = response.data.user.id;
               user.firstName = response.data.user.firstName;
               user.lastName = response.data.user.lastName;
@@ -190,6 +225,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (user && account) {
         token.accessToken = user.accessToken;
         token.refreshToken = user.refreshToken;
+        token.googleAccessToken = user.googleAccessToken;
+        token.googleRefreshToken = user.googleRefreshToken;
         token.provider = account.provider;
         token.user = {
           id: user.id,
@@ -201,18 +238,30 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         return token;
       }
 
-      // Return previous token if the access token has not expired yet
-      if (
-        typeof token.accessTokenExpires === "number" &&
-        Date.now() < token.accessTokenExpires
-      ) {
-        return token;
-      }
-
       // Access token has expired, try to refresh it
-      if (token.provider === "google" && account?.access_token) {
+      console.log("about to refresh google token outer", {
+        account,
+        token,
+      });
+
+      const accessTokenExpired = token.accessToken
+        ? isTokenExpired(token.accessToken)
+        : true;
+      const googleAccessTokenExpired = token.googleAccessToken
+        ? isTokenExpired(token.googleAccessToken)
+        : false;
+      // const accessTokenExpired = true;
+      // const googleAccessTokenExpired = true;
+
+      // TODO: Add a check to see that if the google access token is expired, only then the access token is refreshed.
+      let updatedToken = {
+        ...token,
+      };
+
+      if (token.provider === "google" && googleAccessTokenExpired) {
         try {
           // First refresh the Google token using Next Auth's built-in mechanism
+          console.log("about to refresh google token inner");
           const response = await fetch(
             "https://accounts.google.com/o/oauth2/token",
             {
@@ -221,7 +270,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                 client_id: process.env.GOOGLE_CLIENT_ID!,
                 client_secret: process.env.GOOGLE_CLIENT_SECRET!,
                 grant_type: "refresh_token",
-                refresh_token: token.refreshToken!,
+                refresh_token: token.googleRefreshToken!,
               }),
               method: "POST",
             }
@@ -229,35 +278,39 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
           const tokens = await response.json();
 
+          console.log("refreshed token", tokens);
+
           if (!response.ok) throw tokens;
+          console.log("refreshed google tokens", tokens);
 
-          // Then use the new Google token to get fresh access/refresh tokens from your backend
-          const backendResponse = await axios.post(
-            `${BACKEND_URL}/auth/generate-tokens`,
-            {
-              token: tokens.access_token,
-              tokenType: "google",
-            }
-          );
-
-          return {
+          updatedToken = {
             ...token,
-            accessToken: backendResponse.data.data.accessToken,
-            refreshToken: backendResponse.data.data.refreshToken,
+            googleAccessToken: tokens.id_token,
             error: undefined,
           };
         } catch (error) {
           return { ...token, error: "RefreshAccessTokenError" };
         }
-      } else {
-        // Regular token refresh for credentials provider
-        return refreshAccessToken(token);
       }
+
+      if (accessTokenExpired) {
+        // Regular token refresh for credentials provider
+        const backendTokenData = await refreshAccessToken(token);
+        updatedToken = {
+          ...token,
+          ...backendTokenData,
+        };
+        console.log("refreshed backend tokens", backendTokenData);
+      }
+
+      return updatedToken;
     },
 
     async session({ session, token }) {
       session.accessToken = token.accessToken;
       session.refreshToken = token.refreshToken;
+      session.googleAccessToken = token.googleAccessToken;
+      session.googleRefreshToken = token.googleRefreshToken;
       session.error = token.error;
       session.provider = token.provider;
       session.user = {
@@ -270,9 +323,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
   },
   pages: {
-    signIn: "/auth/signin",
-    signOut: "/auth/signout",
-    error: "/auth/error",
+    signIn: "/signin",
+    error: "/error",
   },
   session: {
     strategy: "jwt",
