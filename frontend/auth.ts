@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-unused-vars */
-import NextAuth, { DefaultSession } from "next-auth";
+ /* eslint-disable @typescript-eslint/no-unused-vars */
+import NextAuth, { Account, DefaultSession, User } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import axios from "axios";
@@ -115,7 +114,7 @@ const refreshGoogleToken = async (googleRefreshToken: string) => {
 };
 
 // Authentication handlers
-const handleCredentialsSignIn = async (user: any) => {
+const handleCredentialsSignIn = async (user: User) => {
   const response = await axios.post(`${BACKEND_URL}/auth/generate-tokens`, {
     token: user.token,
     tokenType: "initial",
@@ -129,7 +128,7 @@ const handleCredentialsSignIn = async (user: any) => {
   return false;
 };
 
-const handleGoogleSignIn = async (user: any, account: any) => {
+const handleGoogleSignIn = async (user: User, account: Account) => {
   const response = await axios.post(`${BACKEND_URL}/auth/generate-tokens`, {
     token: account.id_token,
     tokenType: "google",
